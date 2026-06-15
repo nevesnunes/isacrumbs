@@ -1,15 +1,3 @@
-package ghidra.isacrumbs;
-
-import ghidra.pcodeCPort.slgh_compile.SleighCompile;
-import ghidra.pcodeCPort.slghpatexpress.PatternExpression;
-import ghidra.pcodeCPort.slghpatexpress.PatternValue;
-import ghidra.pcodeCPort.slghpatexpress.TokenPattern;
-import ghidra.pcodeCPort.slghpattern.ContextPattern;
-import ghidra.pcodeCPort.slghpattern.InstructionPattern;
-import ghidra.pcodeCPort.slghpattern.OrPattern;
-import ghidra.pcodeCPort.slghpattern.Pattern;
-import ghidra.pcodeCPort.slghsymbol.*;
-
 import java.io.FileDescriptor;
 import java.io.FileOutputStream;
 import java.io.IOException;
@@ -20,13 +8,24 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.stream.IntStream;
 
-import static ghidra.isacrumbs.SleighInstructionsVisitor.BitPattern.KIND_CONST;
-import static ghidra.isacrumbs.SleighInstructionsVisitor.BitPattern.KIND_RANGE;
+import ghidra.pcodeCPort.slgh_compile.SleighCompile;
+import ghidra.pcodeCPort.slghpatexpress.PatternExpression;
+import ghidra.pcodeCPort.slghpatexpress.PatternValue;
+import ghidra.pcodeCPort.slghpatexpress.TokenPattern;
+import ghidra.pcodeCPort.slghpattern.ContextPattern;
+import ghidra.pcodeCPort.slghpattern.InstructionPattern;
+import ghidra.pcodeCPort.slghpattern.OrPattern;
+import ghidra.pcodeCPort.slghpattern.Pattern;
+import ghidra.pcodeCPort.slghsymbol.Constructor;
+import ghidra.pcodeCPort.slghsymbol.OperandSymbol;
+import ghidra.pcodeCPort.slghsymbol.SubtableSymbol;
+import ghidra.pcodeCPort.slghsymbol.TripleSymbol;
+import ghidra.pcodeCPort.slghsymbol.VarnodeSymbol;
 
-public class SleighInstructionsVisitor {
+public class AsmGenVisitor {
     private final SleighCompile sc;
 
-    public SleighInstructionsVisitor(final SleighCompile sc) {
+    public AsmGenVisitor(final SleighCompile sc) {
         this.sc = sc;
     }
 
@@ -50,19 +49,18 @@ public class SleighInstructionsVisitor {
             }
 
             return patterns;
-        } else {
-            throw new IllegalStateException(String.format("Could not find name '%s'.", symName));
         }
+
+        throw new IllegalStateException(String.format("Could not find name '%s'.", symName));
     }
 
     private List<List<BitPattern>> visitCtor(final Constructor ctor) {
         final List<List<BitPattern>> patterns = new ArrayList<>();
         final BitPattern ctorBitPattern = new BitPattern(
-                KIND_CONST,
+                BitPattern.KIND_CONST,
                 ctor.getPattern().getLeftEllipsis(),
                 ctor.getPattern().getRightEllipsis(),
-                expandPattern(ctor.getPattern())
-        );
+                expandPattern(ctor.getPattern()));
         for (int i = 0; i < ctor.getNumOperands(); i++) {
             final OperandSymbol op = ctor.getOperand(i);
             if (op.isOffsetIrrelevant()) {
@@ -76,26 +74,22 @@ public class SleighInstructionsVisitor {
                     .map(sym -> switch (sym) {
                         case SubtableSymbol ss -> visitOp(ss);
                         // Registers that aren't encoded as tokens aren't part of assembled bit patterns.
-                        case VarnodeSymbol ignored -> List.<List<BitPattern>>of();
+                        case VarnodeSymbol ignored -> List.<List<BitPattern>> of();
                         case TripleSymbol ts -> throw new IllegalStateException(String.format(
                                 "Unexpected operand name '%s'.",
-                                ts.getType()
-                        ));
+                                ts.getType()));
                     })
                     .orElseGet(() -> switch (op.getDefiningExpression()) {
                         case PatternValue patternValue -> List.of(List.of(new BitPattern(
-                                KIND_RANGE,
+                                BitPattern.KIND_RANGE,
                                 false,
                                 false,
                                 List.of(
                                         patternValue.genPattern(patternValue.minValue()).getPattern(),
-                                        patternValue.genPattern(patternValue.maxValue()).getPattern()
-                                )
-                        )));
+                                        patternValue.genPattern(patternValue.maxValue()).getPattern()))));
                         case PatternExpression patternExpression -> throw new IllegalStateException(String.format(
                                 "Unexpected operand expression '%s'.",
-                                patternExpression.getClass().getSimpleName()
-                        ));
+                                patternExpression.getClass().getSimpleName()));
                     });
             patterns.addAll(opTokenPatterns.stream()
                     .map(opPatterns -> {
@@ -104,12 +98,10 @@ public class SleighInstructionsVisitor {
                             expandedPatterns.add(ctorBitPattern);
                             expandedPatterns.addAll(opPatterns);
                             return expandedPatterns;
-                        } else {
-                            return opPatterns;
                         }
+                        return opPatterns;
                     })
-                    .toList()
-            );
+                    .toList());
         }
 
         if (patterns.isEmpty() && ctorBitPattern.length() > 0) {
@@ -131,11 +123,10 @@ public class SleighInstructionsVisitor {
     private List<List<BitPattern>> visitOp(final SubtableSymbol sym) {
         final List<List<BitPattern>> patterns = new ArrayList<>();
         final BitPattern symBitPattern = new BitPattern(
-                KIND_CONST,
+                BitPattern.KIND_CONST,
                 sym.getPattern().getLeftEllipsis(),
                 sym.getPattern().getRightEllipsis(),
-                expandPattern(sym.getPattern())
-        );
+                expandPattern(sym.getPattern()));
         for (int i = 0; i < sym.getNumConstructors(); i++) {
             patterns.addAll(visitCtor(sym.getConstructor(i)).stream()
                     .map(ctorPatterns -> {
@@ -144,12 +135,10 @@ public class SleighInstructionsVisitor {
                             extendedPatterns.add(symBitPattern);
                             extendedPatterns.addAll(ctorPatterns);
                             return extendedPatterns;
-                        } else {
-                            return ctorPatterns;
                         }
+                        return ctorPatterns;
                     })
-                    .toList()
-            );
+                    .toList());
         }
 
         return patterns;
@@ -174,17 +163,19 @@ public class SleighInstructionsVisitor {
      * @param values Bits to choose when encoding.
      */
     public record BitPattern(int length,
-                             int kind,
-                             boolean le,
-                             boolean re,
-                             List<Pattern> values) {
+            int kind,
+            boolean le,
+            boolean re,
+            List<Pattern> values) {
         // Values represent literal choices.
         public static int KIND_CONST = 0;
         // Values represent [start:end] boundaries for generating all possible choices.
         public static int KIND_RANGE = 1;
 
         public BitPattern(int kind, boolean le, boolean re, List<Pattern> values) {
-            this(values.isEmpty() ? 0 : bitsLength(values.getFirst()), kind, le, re, values);
+            this(values.isEmpty()
+                    ? 0
+                    : bitsLength(values.getFirst()), kind, le, re, values);
         }
 
         private static int bitsLength(Pattern pattern) {
@@ -195,8 +186,7 @@ public class SleighInstructionsVisitor {
                 case OrPattern orPattern -> bitsLength(orPattern.getDisjoint(0));
                 case Pattern ignoredPattern -> throw new IllegalStateException(String.format(
                         "Unexpected ctor pattern '%s'.",
-                        pattern.getClass().getSimpleName()
-                ));
+                        pattern.getClass().getSimpleName()));
             };
         }
     }

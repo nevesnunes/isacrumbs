@@ -1,23 +1,27 @@
-package ghidra.isacrumbs;
-
-import com.google.common.io.Files;
-import ghidra.pcodeCPort.slgh_compile.SleighCompile;
-import ghidra.pcodeCPort.slgh_compile.SleighCompilePreprocessorDefinitionsAdapater;
-import ghidra.sleigh.grammar.*;
-import org.antlr.runtime.ANTLRStringStream;
-import org.antlr.runtime.CharStream;
-import org.antlr.runtime.UnbufferedTokenStream;
-import org.antlr.runtime.tree.CommonTreeNodeStream;
-import org.junit.Test;
+import static org.junit.Assert.assertTrue;
 
 import java.io.File;
 import java.util.List;
 
-public class SleighInstructionsTest {
+import org.antlr.runtime.ANTLRStringStream;
+import org.antlr.runtime.CharStream;
+import org.antlr.runtime.UnbufferedTokenStream;
+import org.antlr.runtime.tree.CommonTreeNodeStream;
+import org.junit.jupiter.api.Test;
+
+import ghidra.pcodeCPort.slgh_compile.SleighCompile;
+import ghidra.pcodeCPort.slgh_compile.SleighCompilePreprocessorDefinitionsAdapater;
+import ghidra.sleigh.grammar.LineArrayListWriter;
+import ghidra.sleigh.grammar.ParsingEnvironment;
+import ghidra.sleigh.grammar.SleighCompiler;
+import ghidra.sleigh.grammar.SleighLexer;
+import ghidra.sleigh.grammar.SleighParser;
+import ghidra.sleigh.grammar.SleighPreprocessor;
+
+public class AsmGenTest {
     @Test
     public void test() throws Exception {
-        // From "$GHIDRA_INSTALL_DIR/Ghidra/Processors/6502/data/languages/6502.slaspec"
-        final String inputPath = "/tmp/6502.slaspec";
+        final String inputPath = System.getProperty("slaspec.path");
         final File inputFile = new File(inputPath);
         if (!inputFile.exists()) {
             throw new RuntimeException(String.format("File '%s' not found.", inputFile.getAbsolutePath()));
@@ -26,7 +30,8 @@ public class SleighInstructionsTest {
         final SleighCompile sc = new SleighCompile();
         final LineArrayListWriter writer = new LineArrayListWriter();
         final ParsingEnvironment env = new ParsingEnvironment(writer);
-        final SleighCompilePreprocessorDefinitionsAdapater definitionsAdapter = new SleighCompilePreprocessorDefinitionsAdapater(sc);
+        final SleighCompilePreprocessorDefinitionsAdapater definitionsAdapter = new SleighCompilePreprocessorDefinitionsAdapater(
+                sc);
         final SleighPreprocessor sp = new SleighPreprocessor(definitionsAdapter, inputFile);
         sp.process(writer);
 
@@ -50,10 +55,11 @@ public class SleighInstructionsTest {
             throw new RuntimeException(String.format("Compiler error '%d'.", result));
         }
 
-        final SleighInstructionsVisitor visitor = new SleighInstructionsVisitor(sc);
-        final List<SleighInstructionsVisitor.SubTableBitPatterns> patterns = visitor.visitRoot();
-        SleighInstructionsEmitter.toJson(patterns, "/tmp/out.json");
+        final AsmGenVisitor visitor = new AsmGenVisitor(sc);
+        final List<AsmGenVisitor.SubTableBitPatterns> patterns = visitor.visitRoot();
+        assertTrue(!patterns.isEmpty());
 
-        System.out.println("DONE");
+        final String outputPath = System.getProperty("bitpatterns.path", "/tmp/out.json");
+        AsmGenEmitter.toJson(patterns, outputPath);
     }
 }

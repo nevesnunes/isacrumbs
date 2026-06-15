@@ -1,14 +1,17 @@
-package ghidra.isacrumbs;
+import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.Deque;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import ghidra.pcodeCPort.opcodes.OpCode;
 import ghidra.program.model.address.AddressSpace;
 import ghidra.program.model.pcode.AttributeId;
 import ghidra.program.model.pcode.ElementId;
 import ghidra.program.model.pcode.Encoder;
-
-import java.util.*;
-import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
 public class InMemoryEncoder implements Encoder {
 
@@ -26,8 +29,7 @@ public class InMemoryEncoder implements Encoder {
         final String key = Stream
                 .concat(this.keyPrefix.stream(), Stream.of(attribId.name()))
                 .collect(Collectors.joining("."));
-        this.cache.computeIfAbsent(key, ignoredKey -> new ArrayList<>());
-        this.cache.get(key).add(val);
+        this.cache.computeIfAbsent(key, ignoredKey -> new ArrayList<>()).add(val);
     }
 
     @Override

@@ -1,17 +1,16 @@
-package ghidra.isacrumbs;
+import static ghidra.pcodeCPort.slghsymbol.symbol_type.context_symbol;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.stream.Stream;
+
+import org.antlr.runtime.tree.CommonTree;
 
 import ghidra.pcodeCPort.slgh_compile.SleighCompile;
 import ghidra.pcodeCPort.slghsymbol.SleighSymbol;
 import ghidra.pcodeCPort.slghsymbol.ValueSymbol;
 import ghidra.pcodeCPort.slghsymbol.VarnodeSymbol;
 import ghidra.sleigh.grammar.SleighCompiler;
-import org.antlr.runtime.tree.CommonTree;
-
-import java.util.ArrayList;
-import java.util.List;
-import java.util.stream.Stream;
-
-import static ghidra.pcodeCPort.slghsymbol.symbol_type.context_symbol;
 
 public class SleighParseTreeVisitor {
     private final SleighCompile sc;
@@ -47,8 +46,7 @@ public class SleighParseTreeVisitor {
             case SleighCompiler.OP_BOOL_OR -> children(bitPattern)
                     .forEach(orBits -> bits.add(visitBitPattern(orBits).stream()
                             .flatMap(List::stream)
-                            .toList()
-                    ));
+                            .toList()));
             case SleighCompiler.OP_PARENTHESIZED -> children(bitPattern)
                     .forEach(parenBits -> bits.addAll(visitBitPattern(parenBits)));
             case SleighCompiler.OP_EQUAL -> {
@@ -71,14 +69,12 @@ public class SleighParseTreeVisitor {
                         throw new RuntimeException(String.format(
                                 "Unexpected OP_BIT_PATTERN value_symbol '%s' max '%s'.",
                                 name,
-                                max
-                        ));
+                                max));
                     }
                     case varnode_symbol -> ((VarnodeSymbol) sym).getFixedVarnode().size;
                     default -> throw new IllegalStateException(String.format(
                             "Unexpected OP_BIT_PATTERN name type '%s'.",
-                            sym.getType().name()
-                    ));
+                            sym.getType().name()));
                 };
 
                 final List<Long> values = switch (sym.getType()) {
@@ -86,22 +82,19 @@ public class SleighParseTreeVisitor {
                         final CommonTree hexConstant = child(bitPattern, SleighCompiler.OP_HEX_CONSTANT);
                         yield List.of(Long.parseLong(
                                 child(hexConstant, SleighCompiler.HEX_INT).getText().replaceFirst("0x", ""),
-                                16
-                        ));
+                                16));
                     }
                     case varnode_symbol -> List.of(0L, (1L << size) - 1);
                     default -> throw new IllegalStateException(String.format(
                             "Unexpected OP_BIT_PATTERN name type '%s'.",
-                            sym.getType().name()
-                    ));
+                            sym.getType().name()));
                 };
 
                 bits.add(List.of(new BitPattern(size, values)));
             }
             default -> throw new IllegalStateException(String.format(
                     "Unexpected OP_BIT_PATTERN type '%s'.",
-                    SleighCompiler.tokenNames[bitPattern.getType()]
-            ));
+                    SleighCompiler.tokenNames[bitPattern.getType()]));
         }
 
         return bits;
@@ -120,8 +113,9 @@ public class SleighParseTreeVisitor {
                 .findFirst()
                 .orElseThrow(() -> new RuntimeException(String.format(
                         "Child '%s' not found.",
-                        SleighCompiler.tokenNames[type == null ? 0 : type]
-                )));
+                        SleighCompiler.tokenNames[type == null
+                                ? 0
+                                : type])));
     }
 
     private SleighSymbol find(final String name) {
@@ -134,8 +128,8 @@ public class SleighParseTreeVisitor {
             case context_symbol, value_symbol, varnode_symbol -> sym;
             default -> throw new IllegalStateException(String.format(
                     "Unexpected name '%s' of type '%s'.",
-                    name, sym.getType().name()
-            ));
+                    name,
+                    sym.getType().name()));
         };
     }
 
