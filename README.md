@@ -3,7 +3,23 @@
 * [Ghidra scripts](./ghidra/) for program analysis;
     * Symlink files from `./ghidra/src/` to `$HOME/ghidra_scripts/`;
     * Add `./ghidra/test/` as a source directory in a Ghidra Script Project;
-* Practical use case for identified tainted sources: [MAME plugin](./mame/) that fuzzes emulated drivers;
+* Practical use case for identified tainted sources: [MAME plugin](./mame/plugins/fuzz/init.lua) that fuzzes emulated drivers;
+    * Apply patches to [MAME source](https://github.com/mamedev/mame/tree/84e53552f9ab70b0659645e1e5f577f44ea2b620);
+    * Compile:
+        ```sh
+        make -j2 \
+            LDOPTS=-fuse-ld=lld OVERRIDE_CC=clang-21 OVERRIDE_CXX=clang++-21 \
+            SYMBOLS=1 SYMLEVEL=2 DEBUG=0 \
+            SUBTARGET=fuzz SOURCES=src/mame/fuzz/x86_16.cpp
+        ```
+    * Run:
+        ```sh
+        # On ISAcrumbs dir
+        ./mame/bin/engine.py --input ./mame/examples/fuzz_x86_16/patterns.json
+        # On MAME source dir
+        ./fuzz -debug -oslog -verbose -window -resolution0 320x240 \
+            -plugin fuzz -rompath ./mame/examples/fuzz_x86_16/ fuzz_x86_16
+        ```
 
 ## [BackTaint](./ghidra/src/BackTaint.java)
 
@@ -43,7 +59,7 @@ Generate all possible instruction byte sequences from Ghidra SLEIGH processor sp
 
 **Example:** Visualize an instruction set's byte coverage as heatmaps, e.g. MOS 6502:
 
-<img src="./examples/heatmaps.png" height=280rem>
+<img src="./ghidra/examples/heatmaps.png" height=280rem>
 
 Rows are high 4-bits, columns are low 4-bits. Each set of heatmaps corresponds to the 1st byte of single byte instructions, then 1st and 2nd bytes of 2-byte instructions, etc. Only the first value of 16-bit operands is rendered.
 
@@ -75,3 +91,7 @@ Rows are high 4-bits, columns are low 4-bits. Each set of heatmaps corresponds t
     - 3-bytes: 1st 00..ff * 2nd 00..ff, 2nd 00..ff * 3rd 00..ff
     - 4-bytes: 1st 00..ff * 2nd 00..ff, 2nd 00..ff * 3rd 00..ff + ...
     ```
+
+## Acks
+
+* [1-remove-integrity-checks.patch](./mame/patches/1-remove-integrity-checks.patch) originated from [rad_sbw](https://github.com/widberg/rad_sbw/tree/master/patches/mame);
