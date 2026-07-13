@@ -1,0 +1,6 @@
+[
+    { "kind": 0, "space": "program", "addr_size": 24, "addr": "00eff0", "data_size": 16, "vals": ["0x1234"] },
+    { "kind": 1, "space": "program", "addr_size": 24, "addr": "ff0002", "data_size": 16, "regs": { "AX": "0x0001" } },
+    { "kind": 1, "space": "program", "addr_size": 24, "addr": "ff0012", "data_size": 16, "regs": { "AX": "0x0000" } },
+    { "kind": 1, "space": "program", "addr_size": 24, "addr": "ff0033", "data_size": 16, "regs": { "AX": "0x0000" } }
+]

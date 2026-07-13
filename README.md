@@ -1,10 +1,11 @@
 # ISAcrumbs
 
-Ghidra scripts for program analysis.
+* [Ghidra scripts](./ghidra/) for program analysis;
+    * Symlink files from `./ghidra/src/` to `$HOME/ghidra_scripts/`;
+    * Add `./ghidra/test/` as a source directory in a Ghidra Script Project;
+* Practical use case for identified tainted sources: [MAME plugin](./mame/) that fuzzes emulated drivers;
 
-These can be symlinked from `./src/` to `ghidra_scripts`.
-
-## [BackTaint](./src/BackTaint.java)
+## [BackTaint](./ghidra/src/BackTaint.java)
 
 Taint analysis in backwards direction of an instruction output.
 
@@ -17,7 +18,7 @@ When developing emulators, we might encounter a certain control flow path  that 
 ./run.sh "$GHIDRA_INSTALL_DIR" "$GHIDRA_SCRIPTS_PROJECT_DIR" BackTaintTest
 ```
 
-## [MakeFuncParams](./src/MakeFuncParams.java)
+## [MakeFuncParams](./ghidra/src/MakeFuncParams.java)
 
 Identify and apply register parameters to functions. Parameters are inferred via data flow tracking of reads-before-writes.
 
@@ -28,7 +29,7 @@ Identify and apply register parameters to functions. Parameters are inferred via
 ./run.sh "$GHIDRA_INSTALL_DIR" "$GHIDRA_SCRIPTS_PROJECT_DIR" MakeFuncParamsTest
 ```
 
-## [PropagateFuncParams](./src/PropagateFuncParams.java)
+## [PropagateFuncParams](./ghidra/src/PropagateFuncParams.java)
 
 Propagate parameter values computed in caller functions, since default auto-analysis doesn't flow constants across functions.
 
@@ -36,7 +37,7 @@ Memory references may be automatically generated.
 
 Function inlining is done on a best-effort to ensure callee modified values are also propagated to caller functions (expected when callee killed registers aren't restored).
 
-## [AsmGen](./src/AsmGenVisitor.java)
+## [AsmGen](./ghidra/src/AsmGenVisitor.java)
 
 Generate all possible instruction byte sequences from Ghidra SLEIGH processor specification files (.slaspec).
 

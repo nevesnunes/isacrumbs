@@ -1,0 +1,142 @@
+diff --git a/src/emu/diimage.cpp b/src/emu/diimage.cpp
+index 59d1523a6b1..38705983bf6 100644
+--- a/src/emu/diimage.cpp
++++ b/src/emu/diimage.cpp
+@@ -698,38 +698,7 @@ std::vector<u32> device_image_interface::determine_open_plan(bool is_create)
+ 
+ static int verify_length_and_hash(emu_file *file, std::string_view name, u32 explength, const util::hash_collection &hashes)
+ {
+-	int retval = 0;
+-	if (!file)
+-		return 0;
+-
+-	// verify length
+-	u32 actlength = file->size();
+-	if (explength != actlength)
+-	{
+-		osd_printf_error("%s WRONG LENGTH (expected: %d found: %d)\n", name, explength, actlength);
+-		retval++;
+-	}
+-
+-	util::hash_collection &acthashes = file->hashes(hashes.hash_types());
+-	if (hashes.flag(util::hash_collection::FLAG_NO_DUMP))
+-	{
+-		// If there is no good dump known, write it
+-		osd_printf_error("%s NO GOOD DUMP KNOWN\n", name);
+-	}
+-	else if (hashes != acthashes)
+-	{
+-		// otherwise, it's just bad
+-		osd_printf_error("%s WRONG CHECKSUMS:\n", name);
+-		osd_printf_error("    EXPECTED: %s\n", hashes.macro_string());
+-		osd_printf_error("       FOUND: %s\n", acthashes.macro_string());
+-		retval++;
+-	}
+-	else if (hashes.flag(util::hash_collection::FLAG_BAD_DUMP))
+-	{
+-		// If it matches, but it is actually a bad dump, write it
+-		osd_printf_error("%s NEEDS REDUMP\n",name);
+-	}
+-	return retval;
++	return 0;
+ }
+ 
+ 
+diff --git a/src/emu/romload.cpp b/src/emu/romload.cpp
+index f1f642812e3..ba9f2bd0124 100644
+--- a/src/emu/romload.cpp
++++ b/src/emu/romload.cpp
+@@ -588,47 +588,6 @@ void rom_load_manager::dump_wrong_and_correct_checksums(const util::hash_collect
+ 
+ void rom_load_manager::verify_length_and_hash(emu_file *file, std::string_view name, u32 explength, const util::hash_collection &hashes)
+ {
+-	// we've already complained if there is no file
+-	if (!file)
+-		return;
+-
+-	// verify length
+-	u64 const actlength(file->size());
+-	if (explength != actlength)
+-	{
+-		m_errorstring.append(string_format("%s WRONG LENGTH (expected: %08x found: %08x)\n", name, explength, actlength));
+-		m_warnings++;
+-		m_presentbad++;
+-	}
+-
+-	if (hashes.flag(util::hash_collection::FLAG_NO_DUMP))
+-	{
+-		// If there is no good dump known, write it
+-		m_errorstring.append(string_format("%s NO GOOD DUMP KNOWN\n", name));
+-		m_knownbad++;
+-	}
+-	else
+-	{
+-		// verify checksums
+-		util::hash_collection const &acthashes(file->hashes(hashes.hash_types()));
+-		if (hashes != acthashes)
+-		{
+-			// otherwise, it's just bad
+-			util::hash_collection const &all_acthashes = (acthashes.hash_types() == util::hash_collection::HASH_TYPES_ALL)
+-					? acthashes
+-					: file->hashes(util::hash_collection::HASH_TYPES_ALL);
+-			m_errorstring.append(string_format("%s WRONG CHECKSUMS:\n", name));
+-			dump_wrong_and_correct_checksums(hashes, all_acthashes);
+-			m_warnings++;
+-			m_presentbad++;
+-		}
+-		else if (hashes.flag(util::hash_collection::FLAG_BAD_DUMP))
+-		{
+-			// If it matches, but it is actually a bad dump, write it
+-			m_errorstring.append(string_format("%s ROM NEEDS REDUMP\n", name));
+-			m_knownbad++;
+-		}
+-	}
+ }
+ 
+ 
+@@ -1203,23 +1162,6 @@ void rom_load_manager::process_disk_entries(
+ 				continue;
+ 			}
+ 
+-			// get the header and verify the SHA1 digest
+-			util::hash_collection acthashes;
+-			acthashes.add_sha1(chd->orig_chd().sha1());
+-			util::hash_collection const hashes(romp->hashdata());
+-			if (hashes != acthashes)
+-			{
+-				m_errorstring.append(string_format("%s WRONG CHECKSUMS:\n", filename));
+-				dump_wrong_and_correct_checksums(hashes, acthashes);
+-				m_warnings++;
+-				m_presentbad++;
+-			}
+-			else if (hashes.flag(util::hash_collection::FLAG_BAD_DUMP))
+-			{
+-				m_errorstring.append(string_format("%s CHD NEEDS REDUMP\n", filename));
+-				m_knownbad++;
+-			}
+-
+ 			// if not read-only, open or create the diff file
+ 			if (!DISK_ISREADONLY(romp))
+ 			{
+diff --git a/src/frontend/mame/audit.cpp b/src/frontend/mame/audit.cpp
+index dbbb9ad8f3d..d3f7e7ca275 100644
+--- a/src/frontend/mame/audit.cpp
++++ b/src/frontend/mame/audit.cpp
+@@ -697,16 +697,7 @@ void media_auditor::compute_status(audit_record &record, const rom_entry *rom, b
+ 	}
+ 	else
+ 	{
+-		if (record.expected_length() != record.actual_length())
+-			record.set_status(audit_status::FOUND_INVALID, audit_substatus::FOUND_WRONG_LENGTH);
+-		else if (record.expected_hashes().flag(util::hash_collection::FLAG_NO_DUMP))
+-			record.set_status(audit_status::GOOD, audit_substatus::FOUND_NODUMP);
+-		else if (record.expected_hashes() != record.actual_hashes())
+-			record.set_status(audit_status::FOUND_INVALID, audit_substatus::FOUND_BAD_CHECKSUM);
+-		else if (record.expected_hashes().flag(util::hash_collection::FLAG_BAD_DUMP))
+-			record.set_status(audit_status::GOOD, audit_substatus::GOOD_NEEDS_REDUMP);
+-		else
+-			record.set_status(audit_status::GOOD, audit_substatus::GOOD);
++		record.set_status(audit_status::GOOD, audit_substatus::GOOD);
+ 	}
+ }
+ 

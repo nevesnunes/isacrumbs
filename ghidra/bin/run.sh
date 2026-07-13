@@ -9,11 +9,13 @@ shift
 TESTS=$1
 shift
 
+RUNNER_DIR=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd -P)
+
 classpath() {
   {
     find "$GHIDRA_INSTALL_DIR" -type f -iname '*.jar'
     find "$GHIDRA_SCRIPTS_DIR/bin" -type f -iname '*.class' -exec dirname {} \; | sort -u
-    find '../lib' -type f -iname '*.jar'
+    find "$RUNNER_DIR/../lib" -type f -iname '*.jar'
   } | paste -sd :
 }
 

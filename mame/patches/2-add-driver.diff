@@ -1,0 +1,153 @@
+diff --git a/src/emu/debug/debugcpu.cpp b/src/emu/debug/debugcpu.cpp
+index 1fdcea395af..13728b02bc6 100644
+--- a/src/emu/debug/debugcpu.cpp
++++ b/src/emu/debug/debugcpu.cpp
+@@ -851,6 +851,27 @@ void device_debug::privilege_hook()
+ 	}
+ }
+ 
++static std::unordered_set<u32> trace_instrs;
++
++void device_debug::dump()
++{
++	emu_file file("/tmp/fuzz", OPEN_FLAG_CREATE | OPEN_FLAG_WRITE);
++	std::error_condition const err = file.open("dump");
++	if (err)
++	{
++		osd_printf_error("%s\n", err.message());
++		return;
++	}
++
++	std::set<u32> trace_instrs_sorted(trace_instrs.begin(), trace_instrs.end());
++	u32 buf;
++	for (auto it = trace_instrs.begin(); it != trace_instrs.end(); it++)
++	{
++		buf = *it;
++		file.write(&buf, sizeof(buf));
++	}
++	file.close();
++}
+ 
+ //-------------------------------------------------
+ //  instruction_hook - called by the CPU cores
+@@ -859,6 +880,8 @@ void device_debug::privilege_hook()
+ 
+ void device_debug::instruction_hook(offs_t curpc)
+ {
++	trace_instrs.insert(curpc);
++
+ 	running_machine &machine = m_device.machine();
+ 	debugger_cpu &debugcpu = machine.debugger().cpu();
+ 
+diff --git a/src/emu/debug/debugcpu.h b/src/emu/debug/debugcpu.h
+index 631d4c788d9..b5529396bf9 100644
+--- a/src/emu/debug/debugcpu.h
++++ b/src/emu/debug/debugcpu.h
+@@ -48,6 +48,9 @@ public:
+ 	bool is_octal() const { return (m_memory != nullptr && m_memory->has_space(AS_PROGRAM)) ? m_memory->space(AS_PROGRAM).is_octal() : false; }
+ 	device_t& device() const { return m_device; }
+ 
++	// trace
++	void dump();
++
+ 	// hooks used by the rest of the system
+ 	void start_hook(const attotime &endtime);
+ 	void stop_hook();
+diff --git a/src/frontend/mame/luaengine_debug.cpp b/src/frontend/mame/luaengine_debug.cpp
+index 79f401c7a00..62df3c54a2b 100644
+--- a/src/frontend/mame/luaengine_debug.cpp
++++ b/src/frontend/mame/luaengine_debug.cpp
+@@ -403,6 +403,11 @@ void lua_engine::initialize_debug(sol::table &emu)
+ 
+ 
+ 	auto device_debug_type = sol().registry().new_usertype<device_debug>("device_debug", sol::no_constructor);
++		device_debug_type.set_function("dump",
++			[] (device_debug &dev)
++			{
++				dev.dump();
++			});
+ 	device_debug_type.set_function("step",
+ 			[] (device_debug &dev, sol::object num)
+ 			{
+diff --git a/src/mame/fuzz/x86_16.cpp b/src/mame/fuzz/x86_16.cpp
+new file mode 100644
+index 00000000000..66b6d1bda84
+--- /dev/null
++++ b/src/mame/fuzz/x86_16.cpp
+@@ -0,0 +1,62 @@
++// license:BSD-3-Clause
++// copyright-holders:
++
++#include "emu.h"
++
++#include "cpu/i86/i286.h"
++
++namespace {
++
++class x86_16_state : public driver_device
++{
++public:
++	x86_16_state(const machine_config &mconfig, device_type type, const char *tag)
++		: driver_device(mconfig, type, tag)
++		, m_maincpu(*this, "maincpu")
++	{ }
++
++	void fuzz_x86_16(machine_config &config);
++
++protected:
++	virtual void machine_start() override ATTR_COLD;
++
++private:
++	required_device<cpu_device> m_maincpu;
++
++	void x86_16_io_map(address_map &map) ATTR_COLD;
++	void x86_16_map(address_map &map) ATTR_COLD;
++};
++
++void x86_16_state::machine_start()
++{
++}
++
++void x86_16_state::x86_16_io_map(address_map &map)
++{
++	map.global_mask(0xffff);
++}
++
++void x86_16_state::x86_16_map(address_map &map)
++{
++	map(0x000000, 0x00dfff).mirror(0xff0000).rom().region("rom", 0);
++	map(0x00e000, 0x00efff).mirror(0xff0000).ram();
++	map(0x00f000, 0x00ffff).mirror(0xff0000).rom().region("rom", 0xf000);
++}
++
++void x86_16_state::fuzz_x86_16(machine_config &config)
++{
++	I80286(config, m_maincpu, 16_MHz_XTAL);
++	m_maincpu->set_addrmap(AS_PROGRAM, &x86_16_state::x86_16_map);
++	m_maincpu->set_addrmap(AS_IO, &x86_16_state::x86_16_io_map);
++}
++
++
++ROM_START( fuzz_x86_16 )
++	ROM_REGION(0x10000, "rom", 0)
++	ROM_LOAD("rom", 0x000000, 0x010000, CRC(12345678) SHA1(1234567812345678123456781234567812345678))
++ROM_END
++
++} // anonymous namespace
++
++
++COMP( 2XXX,  fuzz_x86_16,    0,      0,      fuzz_x86_16, 0,     x86_16_state, empty_init, "fuzz_x86_16", "fuzz_x86_16", MACHINE_NOT_WORKING|MACHINE_NO_SOUND )
+diff --git a/src/mame/mame.lst b/src/mame/mame.lst
+index be548046770..579ee02c697 100644
+--- a/src/mame/mame.lst
++++ b/src/mame/mame.lst
+@@ -9,6 +9,9 @@
+ 
+ *******************************************************************************/
+ 
++@source:fuzz/x86_16.cpp
++fuzz_x86_16
++
+ @source:access/acvirus.cpp
+ virusa
+ virusb
