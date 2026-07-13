@@ -18,7 +18,7 @@
         ./mame/bin/engine.py --input ./mame/examples/fuzz_x86_16/patterns.json
         # On MAME source dir
         ./fuzz -debug -oslog -verbose -window -resolution0 320x240 \
-            -plugin fuzz -rompath ./mame/examples/fuzz_x86_16/ fuzz_x86_16
+            -plugin fuzz -rompath ./mame/examples/ fuzz_x86_16
         ```
 
 ## [BackTaint](./ghidra/src/BackTaint.java)
