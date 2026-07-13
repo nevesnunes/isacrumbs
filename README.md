@@ -4,7 +4,7 @@
     * Symlink files from `./ghidra/src/` to `$HOME/ghidra_scripts/`;
     * Add `./ghidra/test/` as a source directory in a Ghidra Script Project;
 * Practical use case for identified tainted sources: [MAME plugin](./mame/plugins/fuzz/init.lua) that fuzzes emulated drivers;
-    * Apply patches to [MAME source](https://github.com/mamedev/mame/tree/84e53552f9ab70b0659645e1e5f577f44ea2b620);
+    * Apply [patches](./mame/patches/) to [MAME source](https://github.com/mamedev/mame/tree/84e53552f9ab70b0659645e1e5f577f44ea2b620);
     * Compile:
         ```sh
         make -j2 \
