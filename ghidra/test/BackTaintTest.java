@@ -35,6 +35,7 @@ public class BackTaintTest {
     private static Stream<Arguments> x86Args() {
         var argsNone = Arrays.asList(
                 Arguments.of(
+                        "none_ret",
                         Map.of(
                                 "0x0",
                                 "       c3          # RET"),
@@ -42,6 +43,7 @@ public class BackTaintTest {
                         Collections.EMPTY_MAP,
                         "0x0"),
                 Arguments.of(
+                        "none_retf",
                         Map.of(
                                 "0x0",
                                 "       cb          # RETF"),
@@ -49,15 +51,31 @@ public class BackTaintTest {
                         Collections.EMPTY_MAP,
                         "0x0"),
                 Arguments.of(
+                        "none_loop",
                         Map.of(
                                 "0x0",
                                 "       eb fe       # JMP 0x0"),
+                        Set.of("0x0"),
+                        Collections.EMPTY_MAP,
+                        "0x0"),
+                Arguments.of(
+                        "none_loop_bbs",
+                        Map.of(
+                                "0x0",
+                                """
+                                        74 0e       # JZ 0x10"
+                                        75 0e       # JNZ 0x10"
+                                        eb 0e       # JMP 0x10"
+                                        """,
+                                "0x10",
+                                "       eb ee       # JMP 0x0"),
                         Set.of("0x0"),
                         Collections.EMPTY_MAP,
                         "0x0"));
 
         var argsInReg = Arrays.asList(
                 Arguments.of(
+                        "in_reg",
                         Map.of(
                                 "0x0",
                                 """
@@ -71,6 +89,7 @@ public class BackTaintTest {
 
         var argsGenAfterKill = Arrays.asList(
                 Arguments.of(
+                        "gen_after_kill",
                         Map.of(
                                 "0x0",
                                 """
@@ -86,6 +105,7 @@ public class BackTaintTest {
 
         var argsGenCaller = Arrays.asList(
                 Arguments.of(
+                        "gen_caller",
                         Map.of(
                                 "0x0",
                                 """
@@ -105,6 +125,7 @@ public class BackTaintTest {
 
         var argsGenSibling = Arrays.asList(
                 Arguments.of(
+                        "gen_sibling",
                         Map.of(
                                 "0x0",
                                 """
@@ -132,34 +153,35 @@ public class BackTaintTest {
 
         var argsIndirectMerge = Arrays.asList(
                 Arguments.of(
+                        "indirect_merge",
                         Map.of(
                                 "0x0",
                                 """
                                         b8 01 00    # MOV AX,0x1
                                         09 c0       # OR AX,AX
                                         74 09       # JZ 0x10
-                                        e8 26 00    # CALL 0x30
-                                        e9 13 00    # JMP 0x20
+                                        e8 26 00    # CALL 0x30 ------.
+                                        e9 13 00    # JMP 0x20 ---.   |
                                         """,
                                 "0x10",
                                 """
-                                        e8 2d 00    # CALL 0x40
-                                        eb 0b       # JMP 0x20
+                                        e8 2d 00    # CALL 0x40 --)-. |
+                                        eb 0b       # JMP 0x20  --| | |
                                         """,
                                 "0x20",
                                 """
-                                        89 d8       # MOV AX,BX
-                                        c3          # RET
+                                        89 d8       # MOV AX,BX <-' | |
+                                        c3          # RET           | |
                                         """,
                                 "0x30",
                                 """
-                                        88 c7       # MOV BH,AL
-                                        b3 02       # MOV BL,0x02
-                                        c3          # RET
+                                        88 c7       # MOV BH,AL <---)-'
+                                        b3 02       # MOV BL,0x02   |
+                                        c3          # RET           |
                                         """,
                                 "0x40",
                                 """
-                                        88 c7       # MOV BH,AL
+                                        88 c7       # MOV BH,AL <---'
                                         b3 22       # MOV BL,0x22
                                         bb ff 00    # MOV BX,0xff
                                         c3          # RET
@@ -169,10 +191,8 @@ public class BackTaintTest {
                                 new Match(AddressSpace.TYPE_REGISTER, "AL"),
                                 "0x32",
                                 new Match(AddressSpace.TYPE_CONSTANT, 0x02L),
-                                "0x40",
-                                new Match(AddressSpace.TYPE_REGISTER, "AL"),
-                                "0x42",
-                                new Match(AddressSpace.TYPE_CONSTANT, 0x22L)),
+                                "0x44",
+                                new Match(AddressSpace.TYPE_CONSTANT, 0xffL)),
                         "0x20"));
 
         return Stream.of(
@@ -203,9 +223,10 @@ public class BackTaintTest {
         this.testInfo = testInfo;
     }
 
-    @ParameterizedTest(name = "x86Test{0}")
+    @ParameterizedTest(name = "{0}")
     @MethodSource("x86Args")
-    public void x86(final Map<String, String> prgBytes,
+    public void x86(final String testName,
+                    final Map<String, String> prgBytes,
                     final Set<String> funcAddrs,
                     final Map<String, Match> expectedSrcs,
                     final String sinkAddr) throws Exception {
@@ -224,27 +245,51 @@ public class BackTaintTest {
                    final Map<String, Match> expectedSrcs,
                    final String sinkAddr,
                    final String langName) throws Exception {
-        System.out.printf("\n====\n%s\n====\n", testInfo.getDisplayName().replaceAll("\s\s*", " "));
+        System.out.printf("\n==== %s ====\n", testInfo.getDisplayName().replaceAll("\s\s*", " "));
 
         var script = newScript(prgBytes, funcAddrs, sinkAddr, langName);
         var ctx = script.flow();
         var ctxAddrs = Set.copyOf(ctx.deps().values());
         expectedSrcs.forEach((addrStr, match) -> {
             var addr = script.lang.getAddressFactory().getAddress(addrStr);
-            assertTrue(ctxAddrs.contains(addr));
+            assertTrue(
+                    ctxAddrs.contains(addr),
+                    String.format(
+                            "ctx '%s' contains addr '0x%08x'",
+                            ctxAddrs,
+                            addr.getUnsignedOffset()));
 
             var ctxVar = ctx.deps().entrySet().stream()
                     .filter(entry -> entry.getValue().equals(addr))
                     .map(Map.Entry::getKey)
                     .findFirst()
                     .orElseThrow();
-            assertEquals(match.spaceType, ctxVar.getAddress().getAddressSpace().getType());
+            assertEquals(
+                    match.spaceType,
+                    ctxVar.getAddress().getAddressSpace().getType(),
+                    String.format(
+                            "space type '%d' matches ctx '%d'",
+                            match.spaceType,
+                            ctxVar.getAddress().getAddressSpace().getType()));
+
             if (match.spaceType == AddressSpace.TYPE_CONSTANT) {
-                assertEquals(match.val, ctxVar.getOffset());
-            } else if (match.spaceType == AddressSpace.TYPE_REGISTER) {
                 assertEquals(
-                        script.lang.getRegister(match.val.toString()),
-                        script.lang.getRegister(ctxVar.getAddress(), ctxVar.getSize()));
+                        match.val,
+                        ctxVar.getOffset(),
+                        String.format(
+                                "val '%s' matches ctx '0x%08x'",
+                                match.val,
+                                ctxVar.getOffset()));
+            } else if (match.spaceType == AddressSpace.TYPE_REGISTER) {
+                var matchReg = script.lang.getRegister(match.val.toString());
+                var ctxReg = script.lang.getRegister(ctxVar.getAddress(), ctxVar.getSize());
+                assertEquals(
+                        matchReg,
+                        ctxReg,
+                        String.format(
+                                "reg '%s' matches ctx '%s'",
+                                matchReg,
+                                ctxReg));
             }
         });
     }
@@ -271,13 +316,12 @@ public class BackTaintTest {
                             .collect(Collectors.joining()));
             try {
                 builder.setBytes(addr, bytes, true);
-                if (funcAddrs.contains(addr)) {
-                    builder.createEmptyFunction(String.format("FUN_%s", addr), addr, bytes.length, DataType.DEFAULT);
-                }
             } catch (final Exception e) {
                 throw new RuntimeException(e);
             }
         });
+        funcAddrs.forEach(addr -> builder.createFunction(addr));
+
         var prg = builder.getProgram();
         prg.startTransaction(this.getClass().getSimpleName());
 

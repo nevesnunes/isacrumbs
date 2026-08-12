@@ -54,12 +54,14 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.Stack;
 import java.util.TreeMap;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import ghidra.app.decompiler.DecompInterface;
 import ghidra.app.decompiler.DecompileOptions;
@@ -338,7 +340,10 @@ public class BackTaint extends GhidraScript {
                 // TODO: Process hooks from .pspec files, keyed by language id.
                 taint(ctx, instrAddr, pcodeOp, out);
                 break;
-            case CAST, COPY, INDIRECT, MULTIEQUAL,
+            case INDIRECT:
+                taint(ctx, instrAddr, pcodeOp, out);
+                break;
+            case CAST, COPY, MULTIEQUAL,
                     BOOL_AND, BOOL_NEGATE, BOOL_OR, BOOL_XOR,
                     FLOAT_ABS, FLOAT_ADD, FLOAT_CEIL, FLOAT_DIV,
                     FLOAT_FLOOR, FLOAT_MULT, FLOAT_NAN, FLOAT_NEG,
@@ -513,6 +518,20 @@ public class BackTaint extends GhidraScript {
         return String.format("0x%x", vnode.getOffset());
     }
 
+    static class DistinctStack<E> extends Stack<E> {
+        private Set<E> set = new HashSet<>();
+
+        @Override
+        public E push(E item) {
+            if (!this.set.contains(item)) {
+                this.set.add(item);
+                super.push(item);
+            }
+
+            return item;
+        }
+    }
+
     private record TrackedFunction(HighFunction highFunc, Map<Address, TreeMap<Integer, PcodeOp>> numberedOps) {
     }
 
@@ -521,18 +540,18 @@ public class BackTaint extends GhidraScript {
             Map<Varnode, Address> deps,
             Map<Address, Set<Address>> memReads,
             Map<Address, Set<Address>> memWrites,
-            Stack<Address> nextBBs,
-            Stack<Instruction> nextInstrs,
-            Stack<SequenceNumber> nextSeqNums) {
+            DistinctStack<Address> nextBBs,
+            DistinctStack<Instruction> nextInstrs,
+            DistinctStack<SequenceNumber> nextSeqNums) {
         public TaintContext() {
             this(
                     new HashMap<>(),
                     new HashMap<>(),
                     new HashMap<>(),
                     new HashMap<>(),
-                    new Stack<>(),
-                    new Stack<>(),
-                    new Stack<>());
+                    new DistinctStack<>(),
+                    new DistinctStack<>(),
+                    new DistinctStack<>());
         }
     }
 }
