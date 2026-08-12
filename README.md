@@ -40,6 +40,15 @@ Identify and apply register parameters to functions. Parameters are inferred via
 
 **Example:** Programs on which there is no evident calling convention being followed.
 
+Disassembly with 2 reads-before-writes (AX, BL) and 1 dead store (CX):
+<img src="./ghidra/examples/params1.png">
+
+Before:
+<img src="./ghidra/examples/params2.png">
+
+After:
+<img src="./ghidra/examples/params3.png">
+
 **Usage:**
 ```sh
 ./run.sh "$GHIDRA_INSTALL_DIR" "$GHIDRA_SCRIPTS_PROJECT_DIR" MakeFuncParamsTest
