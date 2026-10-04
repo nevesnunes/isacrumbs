@@ -24,7 +24,6 @@ import ghidra.framework.Application;
 import ghidra.framework.ApplicationConfiguration;
 import ghidra.program.database.ProgramBuilder;
 import ghidra.program.model.address.AddressSpace;
-import ghidra.program.model.data.DataType;
 import ghidra.program.model.listing.Program;
 
 public class BackTaintTest {
@@ -103,6 +102,59 @@ public class BackTaintTest {
                         Map.of("0x3", new Match(AddressSpace.TYPE_CONSTANT, 0x2L)),
                         "0x9"));
 
+        var argsBB1 = Arrays.asList(
+                Arguments.of(
+                        "bb1",
+                        Map.of(
+                                "0x0",
+                                """
+                                        b8 01 00  # MOV AX,0x1
+                                        09 c0     # OR AX,AX
+                                        74 09     # JZ 0x10 ----.
+                                        c3        # RET         |
+                                        """,
+                                "0x10",
+                                """
+                                        88 c7     # MOV BH,AL <-'
+                                        b3 02     # MOV BL,0x02
+                                        89 d8     # MOV AX,BX
+                                        c3        # RET
+                                        """),
+                        Set.of("0x0"),
+                        Map.of("0x0", new Match(AddressSpace.TYPE_CONSTANT, 0x1L)),
+                        "0x14"));
+
+        var argsBB2 = Arrays.asList(
+                Arguments.of(
+                        "bb2",
+                        Map.of(
+                                "0x0",
+                                """
+                                        b8 01 00  # MOV AX,0x1
+                                        09 c0     # OR AX,AX
+                                        74 09     # JZ 0x10 ---------.
+                                        eb 17     # JMP 0x20 ------. |
+                                        """,
+                                "0x10",
+                                """
+                                        89 d8     # MOV AX,BX <----|-'
+                                        eb 1c     # JMP 0x30 ----. |
+                                        """,
+                                "0x20",
+                                """
+                                        88 c7     # MOV BH,AL <--|-'
+                                        b3 02     # MOV BL,0x02  |
+                                        eb 0a     # JMP 0x30 ----+
+                                        """,
+                                "0x30",
+                                """
+                                        89 d8     # MOV AX,BX <--'
+                                        c3        # RET
+                                        """),
+                        Set.of("0x0"),
+                        Map.of("0x0", new Match(AddressSpace.TYPE_CONSTANT, 0x1L)),
+                        "0x30"));
+
         var argsGenCaller = Arrays.asList(
                 Arguments.of(
                         "gen_caller",
@@ -111,12 +163,12 @@ public class BackTaintTest {
                                 """
                                         bb 02 00    # MOV BX,0x2
                                         b8 01 00    # MOV AX,0x1
-                                        e8 07 00    # CALL 0x10
-                                        c3          # RET
+                                        e8 07 00    # CALL 0x10 --.
+                                        c3          # RET         |
                                         """,
                                 "0x10",
                                 """
-                                        89 c3       # MOV BX,AX
+                                        89 c3       # MOV BX,AX <-'
                                         c3          # RET
                                         """),
                         Set.of("0x0", "0x10"),
@@ -130,21 +182,21 @@ public class BackTaintTest {
                                 "0x0",
                                 """
                                         bb 02 00    # MOV BX,0x2
-                                        e8 1a 00    # CALL 0x20
-                                        bb 03 00    # MOV BX,0x3
-                                        e8 24 00    # CALL 0x30
-                                        e8 21 00    # CALL 0x30
-                                        e8 1e 00    # CALL 0x30
-                                        c3          # RET
+                                        e8 1a 00    # CALL 0x20 ---.
+                                        bb 03 00    # MOV BX,0x3   |
+                                        e8 24 00    # CALL 0x30 --.|
+                                        e8 21 00    # CALL 0x30 --+|
+                                        e8 1e 00    # CALL 0x30 --+|
+                                        c3          # RET         ||
                                         """,
                                 "0x20",
                                 """
-                                        b8 01 00    # MOV AX,0x1
-                                        c3          # RET
+                                        b8 01 00    # MOV AX,0x1 <-'
+                                        c3          # RET         |
                                         """,
                                 "0x30",
                                 """
-                                        89 c3       # MOV BX,AX
+                                        89 c3       # MOV BX,AX <-'
                                         c3          # RET
                                         """),
                         Set.of("0x0", "0x20", "0x30"),
@@ -161,7 +213,7 @@ public class BackTaintTest {
                                         09 c0       # OR AX,AX
                                         74 09       # JZ 0x10
                                         e8 26 00    # CALL 0x30 ------.
-                                        e9 13 00    # JMP 0x20 ---.   |
+                                        eb 14       # JMP 0x20 ---.   |
                                         """,
                                 "0x10",
                                 """
@@ -197,10 +249,12 @@ public class BackTaintTest {
 
         return Stream.of(
                 argsInReg,
+                argsBB1,
+                argsBB2,
                 argsGenAfterKill,
-                // argsGenCaller,
-                // argsGenSibling,
-                // argsIndirectMerge,
+                argsGenCaller,
+                argsGenSibling,
+                argsIndirectMerge,
                 argsNone)
                 .flatMap(Collection::stream);
     }
@@ -248,8 +302,8 @@ public class BackTaintTest {
         System.out.printf("\n==== %s ====\n", testInfo.getDisplayName().replaceAll("\s\s*", " "));
 
         var script = newScript(prgBytes, funcAddrs, sinkAddr, langName);
-        var ctx = script.flow();
-        var ctxAddrs = Set.copyOf(ctx.deps().values());
+        var tctx = script.flow();
+        var ctxAddrs = Set.copyOf(tctx.deps().values());
         expectedSrcs.forEach((addrStr, match) -> {
             var addr = script.lang.getAddressFactory().getAddress(addrStr);
             assertTrue(
@@ -259,7 +313,7 @@ public class BackTaintTest {
                             ctxAddrs,
                             addr.getUnsignedOffset()));
 
-            var ctxVar = ctx.deps().entrySet().stream()
+            var ctxVar = tctx.deps().entrySet().stream()
                     .filter(entry -> entry.getValue().equals(addr))
                     .map(Map.Entry::getKey)
                     .findFirst()
