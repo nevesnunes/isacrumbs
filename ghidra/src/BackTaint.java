@@ -848,22 +848,7 @@ public class BackTaint extends GhidraScript {
                     // TODO: Process hooks from .pspec files, keyed by language id.
                     taint(tctx, instrAddr, pcodeOp, out);
                     break;
-                case INDIRECT:
-                    var sq = new SequenceNumber(pcodeOp.getSeqnum().getTarget(),
-                            (int) pcodeOp.getInput(pcodeOp.getNumInputs() == 1
-                                    ? 0
-                                    : 1)
-                                    .getOffset());
-                    var iop = pctx.trackedFunc.highFunc.getPcodeOp(sq);
-                    if (iop == null) {
-                        throw new RuntimeException(String.format("INDIRECT op not found in func? %08x -> %08x",
-                                instr.getAddress().getUnsignedOffset(),
-                                fmt(pctx.trackedFunc.highFunc, iop)));
-                    }
-                    taint(tctx, instrAddr, pcodeOp, out);
-                    taint(tctx, instrAddr, iop, out);
-                    break;
-                case CAST, COPY, MULTIEQUAL,
+                case CAST, COPY, INDIRECT, MULTIEQUAL,
                         BOOL_AND, BOOL_NEGATE, BOOL_OR, BOOL_XOR,
                         FLOAT_ABS, FLOAT_ADD, FLOAT_CEIL, FLOAT_DIV,
                         FLOAT_FLOOR, FLOAT_MULT, FLOAT_NAN, FLOAT_NEG,
