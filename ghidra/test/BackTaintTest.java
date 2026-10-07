@@ -267,6 +267,53 @@ public class BackTaintTest {
                         Map.of(
                                 "0x0",
                                 """
+                                        a0 10 00     # MOV AL,[0x10]
+                                        88 c3        # MOV BL,AL
+                                        c3           # RET
+                                        """,
+                                "0x10",
+                                """
+                                        aa aa aa aa
+                                        """,
+                                "0x20",
+                                """
+                                        b0 55        # MOV AL, 0x55
+                                        a2 10 00     # MOV [0x10],AL
+                                        c3           # RET
+                                        """),
+                        Set.of("0x0", "0x20"),
+                        Map.of("0x20", new Match(AddressSpace.TYPE_CONSTANT, 0x55L)),
+                        "0x03"),
+                Arguments.of(
+                        "mem2",
+                        Map.of(
+                                "0x0",
+                                """
+                                        b2 5a        # MOV DL, 0x5a
+                                        b3 10        # MOV BL, 0x10
+                                        89 17        # MOV word ptr [BX],DX
+                                        8d 07        # LEA AX,[BX]
+                                        88 c3        # MOV BL,AL
+                                        c3           # RET
+                                        """,
+                                "0x10",
+                                """
+                                        aa aa aa aa
+                                        """,
+                                "0x20",
+                                """
+                                        b0 55        # MOV AL, 0x55
+                                        a2 10 00     # MOV [0x10],AL
+                                        c3           # RET
+                                        """),
+                        Set.of("0x0", "0x20"),
+                        Map.of("0x20", new Match(AddressSpace.TYPE_CONSTANT, 0x55L)),
+                        "0x08"),
+                Arguments.of(
+                        "mem3",
+                        Map.of(
+                                "0x0",
+                                """
                                         a1 10 00     # MOV AX,[0x10]
                                         09 c0        # OR AX,AX
                                         75 19        # JNZ 0x20
@@ -304,32 +351,7 @@ public class BackTaintTest {
                                 new Match(AddressSpace.TYPE_CONSTANT, 0x55L),
                                 "0x40",
                                 new Match(AddressSpace.TYPE_CONSTANT, 0x5aL)),
-                        "0x20"),
-                Arguments.of(
-                        "mem2",
-                        Map.of(
-                                "0x0",
-                                """
-                                        b2 5a        # MOV DL, 0x5a
-                                        b3 10        # MOV BL, 0x10
-                                        89 17        # MOV word ptr [BX],DX
-                                        8d 07        # LEA AX,[BX]
-                                        88 c3        # MOV BL,AL
-                                        c3           # RET
-                                        """,
-                                "0x10",
-                                """
-                                        aa aa aa aa
-                                        """,
-                                "0x20",
-                                """
-                                        b0 55        # MOV AL, 0x55
-                                        a2 10 00     # MOV [0x10],AL
-                                        c3           # RET
-                                        """),
-                        Set.of("0x0", "0x20"),
-                        Map.of("0x20", new Match(AddressSpace.TYPE_CONSTANT, 0x55L)),
-                        "0x08"));
+                        "0x20"));
 
         var argsNone = Arrays.asList(
                 Arguments.of(
@@ -479,7 +501,7 @@ public class BackTaintTest {
                                 final String langName) throws Exception {
         var prg = newProgram(prgBytes, funcAddrs, langName);
         var script = new BackTaint();
-        script.init(prg, prg.getAddressFactory().getAddress(sinkAddr));
+        script.init(prg, prg.getAddressFactory().getAddress(sinkAddr), funcAddrs);
 
         return script;
     }
@@ -499,7 +521,7 @@ public class BackTaintTest {
                 throw new RuntimeException(e);
             }
         });
-        funcAddrs.forEach(addr -> builder.createFunction(addr));
+        funcAddrs.forEach(builder::createFunction);
 
         var prg = builder.getProgram();
         prg.startTransaction(this.getClass().getSimpleName());

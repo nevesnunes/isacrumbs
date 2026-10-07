@@ -17,6 +17,7 @@ import static ghidra.program.model.pcode.PcodeOp.FLOAT_ABS;
 import static ghidra.program.model.pcode.PcodeOp.FLOAT_ADD;
 import static ghidra.program.model.pcode.PcodeOp.FLOAT_CEIL;
 import static ghidra.program.model.pcode.PcodeOp.FLOAT_DIV;
+import static ghidra.program.model.pcode.PcodeOp.FLOAT_EQUAL;
 import static ghidra.program.model.pcode.PcodeOp.FLOAT_FLOOR;
 import static ghidra.program.model.pcode.PcodeOp.FLOAT_MULT;
 import static ghidra.program.model.pcode.PcodeOp.FLOAT_NAN;
@@ -48,6 +49,7 @@ import static ghidra.program.model.pcode.PcodeOp.INT_XOR;
 import static ghidra.program.model.pcode.PcodeOp.INT_ZEXT;
 import static ghidra.program.model.pcode.PcodeOp.LOAD;
 import static ghidra.program.model.pcode.PcodeOp.MULTIEQUAL;
+import static ghidra.program.model.pcode.PcodeOp.SEGMENTOP;
 import static ghidra.program.model.pcode.PcodeOp.STORE;
 import static ghidra.program.model.pcode.PcodeOp.UNIMPLEMENTED;
 
@@ -84,8 +86,11 @@ import ghidra.program.model.pcode.HighFunction;
 import ghidra.program.model.pcode.PcodeOp;
 import ghidra.program.model.pcode.SequenceNumber;
 import ghidra.program.model.pcode.Varnode;
+import ghidra.program.model.scalar.Scalar;
+import ghidra.program.model.symbol.RefType;
 import ghidra.program.model.symbol.Reference;
 import ghidra.program.model.symbol.ReferenceManager;
+import ghidra.program.model.symbol.SourceType;
 import ghidra.util.task.TaskMonitorAdapter;
 
 public class BackTaint extends GhidraScript {
@@ -105,10 +110,11 @@ public class BackTaint extends GhidraScript {
     public ReferenceManager refMgr;
 
     private final Map<Address, TrackedFunction> trackedFuncCache = new HashMap<>();
+    private final Patterns patternMatcher = new Patterns();
 
     @Override
     protected void run() throws Exception {
-        init(currentProgram, currentAddress);
+        init(currentProgram, currentAddress, Collections.emptySet());
         flow();
     }
 
@@ -117,7 +123,7 @@ public class BackTaint extends GhidraScript {
         return message;
     }
 
-    public void init(final Program prg, final Address sink) {
+    public void init(final Program prg, final Address sink, final Set<String> funcAddrs) {
         if (prg == null) {
             throw new RuntimeException("No program loaded.");
         }
@@ -134,6 +140,9 @@ public class BackTaint extends GhidraScript {
         if (this.monitor == null) {
             set(this.prg, new TaskMonitorAdapter());
         }
+
+        funcAddrs.forEach(funcAddr -> decompile(
+                prg.getFunctionManager().getFunctionContaining(prg.getAddressFactory().getAddress(funcAddr))));
     }
 
     record BBContext(Address addr, Set<Address> seenBBAddrs, TaintContext tctx) {
@@ -186,6 +195,12 @@ public class BackTaint extends GhidraScript {
                                 Map.Entry::getKey,
                                 Map.Entry::getValue,
                                 (oldValue, newValue) -> newValue))),
+                new HashMap<Varnode, Address>(ctxs.stream().map(ctx -> ctx.memReadsUnresolved)
+                        .flatMap(map -> map.entrySet().stream())
+                        .collect(Collectors.toMap(
+                                Map.Entry::getKey,
+                                Map.Entry::getValue,
+                                (oldValue, newValue) -> newValue))),
                 new HashMap<Address, Set<Address>>(ctxs.stream().map(ctx -> ctx.memReads)
                         .flatMap(map -> map.entrySet().stream())
                         .collect(Collectors.toMap(
@@ -214,6 +229,7 @@ public class BackTaint extends GhidraScript {
         final var tctx2 = new TaintContext(
                 new HashMap<Varnode, Address>(tctx.sinks),
                 new HashMap<Varnode, Address>(tctx.deps),
+                new HashMap<Varnode, Address>(tctx.memReadsUnresolved),
                 new HashMap<Address, Set<Address>>(tctx.memReads.entrySet().stream()
                         .collect(Collectors.toMap(Map.Entry::getKey, e -> new HashSet<>(e.getValue())))),
                 new HashMap<Address, Set<Address>>(tctx.memWrites.entrySet().stream()
@@ -223,23 +239,67 @@ public class BackTaint extends GhidraScript {
         return tctx2;
     }
 
-    private TrackedFunction decompile(final Function currentFunc) {
-        if (trackedFuncCache.containsKey(currentFunc.getEntryPoint())) {
-            return trackedFuncCache.get(currentFunc.getEntryPoint());
+    public TrackedFunction decompile(final Function func) {
+        if (func == null) {
+            return null;
         }
-        printf("Decompiling '%s' @ %08x.%n", currentFunc.getName(), currentFunc.getEntryPoint().getUnsignedOffset());
+
+        if (trackedFuncCache.containsKey(func.getEntryPoint())) {
+            return trackedFuncCache.get(func.getEntryPoint());
+        }
+        printf("Decompiling '%s' @ %08x.%n", func.getName(), func.getEntryPoint().getUnsignedOffset());
 
         var dec = new DecompInterface();
         dec.setOptions(new DecompileOptions());
         dec.setSimplificationStyle("firstpass");
         dec.openProgram(prg);
 
-        var decFuncRes = dec.decompileFunction(currentFunc, 10, monitor);
+        var decFuncRes = dec.decompileFunction(func, 10, monitor);
         var highFunc = decFuncRes.getHighFunction();
         if (highFunc == null) {
             throw new RuntimeException("Null high function.");
         }
 
+        var numberedOps = expandOps(highFunc);
+        var trackedFunc = new TrackedFunction(highFunc, numberedOps);
+        trackedFuncCache.put(func.getEntryPoint(), trackedFunc);
+
+        // Segmented memory address references are not identified on the first pass,
+        // so they are found and created explicitly here, before dependency tracking starts.
+        createMemXRefs(trackedFunc);
+
+        return trackedFunc;
+    }
+
+    private void createMemXRefs(final TrackedFunction func) {
+        // FIXME: Don't override/duplicate existing references.
+        // TODO: Pass map of assumed register values (e.g. captured via dynamic instruction trace).
+        for (var entry : func.numberedOps.entrySet()) {
+            var addr = entry.getKey();
+            var ops = entry.getValue().values().stream().collect(Collectors.toList());
+            if (patternMatcher.match(ops, Patterns.PATTERNS.get("memread"))) {
+                println(String.format("MEM READ @ %08x", addr.getUnsignedOffset()));
+                var memAddrOp = lst.getInstructionAt(addr).getInputObjects()[1];
+                if (memAddrOp instanceof Scalar) {
+                    var memAddr = prg.getAddressFactory()
+                            .getAddress(String.format("0x%08x", ((Scalar) memAddrOp).getUnsignedValue()));
+                    prg.getReferenceManager()
+                            .addMemoryReference(addr, memAddr, RefType.READ, SourceType.USER_DEFINED, 1);
+                }
+            } else if (patternMatcher.match(ops, Patterns.PATTERNS.get("memwrite"))) {
+                println(String.format("MEM WRITE @ %08x", addr.getUnsignedOffset()));
+                var memAddrOp = lst.getInstructionAt(addr).getInputObjects()[1];
+                if (memAddrOp instanceof Scalar) {
+                    var memAddr = prg.getAddressFactory()
+                            .getAddress(String.format("0x%08x", ((Scalar) memAddrOp).getUnsignedValue()));
+                    prg.getReferenceManager()
+                            .addMemoryReference(addr, memAddr, RefType.WRITE, SourceType.USER_DEFINED, 1);
+                }
+            }
+        }
+    }
+
+    private Map<Address, TreeMap<Integer, PcodeOp>> expandOps(final HighFunction highFunc) {
         List<PcodeOp> pcodeOps = new ArrayList<>();
         var pcodeIt = highFunc.getPcodeOps();
         while (pcodeIt.hasNext()) {
@@ -262,11 +322,7 @@ public class BackTaint extends GhidraScript {
                     .put(op.getSeqnum().getOrder(), op);
             println(fmt(highFunc, op));
         }
-
-        var trackedFunc = new TrackedFunction(highFunc, numberedOps);
-        trackedFuncCache.put(currentFunc.getEntryPoint(), trackedFunc);
-
-        return trackedFunc;
+        return numberedOps;
     }
 
     private void taint(final TaintContext ctx,
@@ -447,7 +503,7 @@ public class BackTaint extends GhidraScript {
                                 entry.getValue().getUnsignedOffset()))
                         .collect(Collectors.joining(","))));
         println(String.format(
-                "Mem R:[%s] W:[%s]",
+                "Mem R:[%s] (Unrsv:[%s]) W:[%s]",
                 tctx.memReads.entrySet().stream()
                         .map(entry -> String.format("%08x @ %s",
                                 entry.getKey().getUnsignedOffset(),
@@ -455,6 +511,11 @@ public class BackTaint extends GhidraScript {
                                         .map(addr -> String.format("%08x",
                                                 addr.getUnsignedOffset()))
                                         .collect(Collectors.joining(","))))
+                        .collect(Collectors.joining(",")),
+                tctx.memReadsUnresolved.entrySet().stream()
+                        .map(entry -> String.format("> %s @ %08x",
+                                fmt(entry.getKey()),
+                                entry.getValue().getUnsignedOffset()))
                         .collect(Collectors.joining(",")),
                 tctx.memWrites.entrySet().stream()
                         .map(entry -> String.format("%08x @ %s",
@@ -464,6 +525,15 @@ public class BackTaint extends GhidraScript {
                                                 addr.getUnsignedOffset()))
                                         .collect(Collectors.joining(","))))
                         .collect(Collectors.joining(","))));
+    }
+
+    private void log(Reference ref) {
+        println(String.format(
+                "ref[%02x](%s): %08x->%08x",
+                ref.getOperandIndex(),
+                ref.getReferenceType().getName(),
+                ref.getFromAddress().getUnsignedOffset(),
+                ref.getToAddress().getUnsignedOffset()));
     }
 
     private void log(final PcodeOp pcodeOp) {
@@ -569,7 +639,8 @@ public class BackTaint extends GhidraScript {
         private PropagatorContext newCtx(Address addr, Set<Address> seenBBAddrs) throws Exception {
             var sinkFunc = lst.getFunctionContaining(addr);
             if (sinkFunc == null) {
-                throw new RuntimeException("No function defined for selected address.");
+                throw new RuntimeException(
+                        String.format("No function defined for selected address 0x%08x.", addr.getUnsignedOffset()));
             }
 
             var trackedFunc = decompile(sinkFunc);
@@ -675,6 +746,7 @@ public class BackTaint extends GhidraScript {
     record TaintContext(
             Map<Varnode, Address> sinks,
             Map<Varnode, Address> deps,
+            Map<Varnode, Address> memReadsUnresolved,
             Map<Address, Set<Address>> memReads,
             Map<Address, Set<Address>> memWrites) implements BackPropagator.VisitorContext {
 
@@ -694,6 +766,7 @@ public class BackTaint extends GhidraScript {
             this(
                     new TreeMap<>(cmp),
                     new TreeMap<>(cmp),
+                    new HashMap<>(),
                     new HashMap<>(),
                     new HashMap<>());
         }
@@ -725,7 +798,6 @@ public class BackTaint extends GhidraScript {
                 }
             }
 
-            // FIXME: Try parsing SEGMENTOP + LOAD
             for (var ref : instr.getReferencesFrom()) {
                 if (ref.isMemoryReference() && ref.getReferenceType().isData()) {
                     var memAddr = ref.getToAddress();
@@ -775,7 +847,6 @@ public class BackTaint extends GhidraScript {
             final Varnode out = out(pcodeOp);
 
             // Find the initial dependencies for this sink.
-            // TODO: Support memory addresses.
             if (tctx.sinks.isEmpty()) {
                 if (out == null || !out.isRegister()) {
                     return;
@@ -817,21 +888,72 @@ public class BackTaint extends GhidraScript {
                 return;
             }
 
+            // TODO: PIECE + SUBPIECE (split and invalidate deps, e.g. BH=PIECE(BX); BX=SUBPIECE(BH,BL);).
             // TODO: Model stack for push/pop macros used as function prologue/epilogue.
             // ghidra.program.util.SymbolicPropogator.applyPcode()
             switch (pcodeOp.getOpcode()) {
+                case SEGMENTOP:
+                    if (pcodeOp.getNumInputs() == 3 && pcodeOp.getInput(1).isRegister()) {
+                        var v2 = pcodeOp.getInput(2);
+                        if (tctx.memReadsUnresolved.containsKey(out)) {
+                            var loadAddr = tctx.memReadsUnresolved.get(out);
+                            tctx.memReadsUnresolved.remove(out);
+                            var instrAddrs = tctx.memReads.get(loadAddr);
+                            if (v2.isRegister()) {
+                                tctx.deps.put(v2, loadAddr);
+                                tctx.memReadsUnresolved.put(v2, loadAddr);
+                            } else if (v2.isConstant()) {
+                                tctx.memReads.remove(loadAddr);
+                                tctx.memReads.put(v2.getAddress(), instrAddrs);
+                                println(String.format(
+                                        "Need MEM WRITE BB for %08x [%08x]",
+                                        v2.getAddress().getUnsignedOffset(),
+                                        loadAddr.getUnsignedOffset()));
+                                var refToIt = refMgr.getReferencesTo(v2.getAddress());
+                                while (refToIt.hasNext()) {
+                                    final Reference refTo = refToIt.next();
+                                    if (refTo.getReferenceType().isWrite()) {
+                                        var writeInstr = lst.getInstructionContaining(refTo.getFromAddress());
+                                        if (writeInstr != null) {
+                                            println(String.format(
+                                                    "Next MEM WRITE BB @ %08x [%08x]",
+                                                    writeInstr.getAddress().getUnsignedOffset(),
+                                                    v2.getAddress().getUnsignedOffset()));
+                                            pctx.nextBBs.add(writeInstr.getAddress());
+                                        }
+                                    }
+                                }
+                            } else {
+                                printerr("Unhandled SEGMENTOP inputs.");
+                            }
+                        }
+                    } else {
+                        printerr("Unhandled SEGMENTOP inputs.");
+                    }
+                    break;
                 case LOAD:
-                    // TODO: Resolve segmented reg/mem values from ctx?
-                    if (pcodeOp.getNumInputs() == 2 && pcodeOp.getInput(1).isAddress()) {
+                    if (pcodeOp.getNumInputs() == 2) {
                         tctx.memReads.computeIfAbsent(
                                 out.getAddress(),
                                 k -> new HashSet<>());
-                        tctx.memReads.get(pcodeOp.getInput(1).getAddress())
-                                .add(instrAddr);
+                        tctx.memReads.get(out.getAddress()).add(instrAddr);
+                        if (pcodeOp.getInput(1).isRegister() || pcodeOp.getInput(1).isUnique()) {
+                            tctx.memReadsUnresolved.put(pcodeOp.getInput(1), out.getAddress());
+                        }
+                    } else {
+                        printerr("Unhandled LOAD inputs.");
                     }
                     taint(tctx, instrAddr, pcodeOp, out);
                     break;
                 case STORE:
+                    if (asDep(tctx, out) == null && out.isUnique()) {
+                        // First time we see this output, computed via segment:
+                        // u0x00010e00(00000022:02) = SEGMENTOP(0x1b374820, DS, 0x00000010)
+                        // u0x00010f00(00000022:03) = COPY(AL(00000020:01))
+                        // STORE(0x000001a1, u0x00010e00(00000022:02), u0x00010f00(00000022:03))
+                        tctx.deps.put(out, instrAddr);
+                        println(String.format("......... + (store unique) %s", fmt(out)));
+                    }
                     if (asDep(tctx, out) != null && out.isAddress()) {
                         tctx.memWrites.computeIfAbsent(
                                 out.getAddress(),
@@ -850,7 +972,7 @@ public class BackTaint extends GhidraScript {
                     break;
                 case CAST, COPY, INDIRECT, MULTIEQUAL,
                         BOOL_AND, BOOL_NEGATE, BOOL_OR, BOOL_XOR,
-                        FLOAT_ABS, FLOAT_ADD, FLOAT_CEIL, FLOAT_DIV,
+                        FLOAT_ABS, FLOAT_ADD, FLOAT_CEIL, FLOAT_DIV, FLOAT_EQUAL,
                         FLOAT_FLOOR, FLOAT_MULT, FLOAT_NAN, FLOAT_NEG,
                         FLOAT_ROUND, FLOAT_SQRT, FLOAT_SUB,
                         INT_ADD, INT_AND, INT_CARRY, INT_DIV, INT_EQUAL,
@@ -908,12 +1030,127 @@ public class BackTaint extends GhidraScript {
         }
     }
 
-    public void log(Reference ref) {
-        println(String.format(
-                "ref[%02x](%s): %08x->%08x",
-                ref.getOperandIndex(),
-                ref.getReferenceType().getName(),
-                ref.getFromAddress().getUnsignedOffset(),
-                ref.getToAddress().getUnsignedOffset()));
+    class Patterns {
+        private static final int ANY = 0;
+        private static final int REG = 0b0000_0001_0000_0000;
+        private static final int SYM_DS = 0b0000_0000_0001_0000;
+        private static final int VAR_01 = 0b0000_0000_0000_0001;
+
+        // These assume opcodes given by "firstpass" decompilation.
+        public static final Map<String, List<PatternElement>> PATTERNS = Map.of(
+                "memread",
+                List.of(
+                        PatternElement.builder().opcode(PcodeOp.SEGMENTOP).in(ANY).in(REG | SYM_DS).in(ANY).out(VAR_01)
+                                .build(),
+                        PatternElement.builder().opcode(PcodeOp.LOAD).in(ANY).in(VAR_01).build()),
+                "memwrite",
+                List.of(
+                        PatternElement.builder().opcode(PcodeOp.SEGMENTOP).in(ANY).in(REG | SYM_DS).in(ANY).out(VAR_01)
+                                .build(),
+                        PatternElement.builder().opcode(PcodeOp.STORE).in(ANY).in(VAR_01).in(ANY).build()));
+
+        private record PatternElement(int opcode, List<Integer> in, List<Integer> out) {
+            public static Builder builder() {
+                return new Builder();
+            }
+
+            public static class Builder {
+                private int opcode = -1;
+                private List<Integer> in = new ArrayList<>();
+                private List<Integer> out = new ArrayList<>();
+
+                public Builder opcode(int opcode) {
+                    this.opcode = opcode;
+                    return this;
+                }
+
+                public Builder in(int in) {
+                    this.in.add(in);
+                    return this;
+                }
+
+                public Builder out(int out) {
+                    this.out.add(out);
+                    return this;
+                }
+
+                public PatternElement build() {
+                    return new PatternElement(opcode, in, out);
+                }
+            }
+        }
+
+        private boolean match(final List<PcodeOp> pcode, final List<PatternElement> pattern) {
+            final var pcodeLen = pcode.size();
+            if (pcodeLen < pattern.size()) {
+                return false;
+            }
+
+            var pattern_i = 0;
+            for (int i = 0; i < pcodeLen; i++) {
+                if (pcode.get(i).getOpcode() != pattern.get(pattern_i).opcode()) {
+                    continue;
+                }
+
+                if (pcode.get(i).getNumInputs() < pattern.get(pattern_i).in().size()) {
+                    return false;
+                }
+
+                Varnode var01 = null;
+                for (int j = 0; j < pattern.get(pattern_i).in().size(); j++) {
+                    final var inPattern = pattern.get(pattern_i).in().get(j);
+                    final var in = pcode.get(i).getInput(j);
+                    if ((inPattern & REG) != 0) {
+                        if (!in.isRegister()) {
+                            return false;
+                        }
+                        if ((inPattern & SYM_DS) != 0) {
+                            final var reg = prg.getRegister("DS");
+                            if (!in.isRegister() || !in.getAddress().equals(reg.getAddress())) {
+                                return false;
+                            }
+                        }
+                    }
+                    if ((inPattern & VAR_01) != 0) {
+                        if (var01 == null) {
+                            var01 = in;
+                        } else if (!(var01.getAddress().getAddressSpace().getName()
+                                .equals(in.getAddress().getAddressSpace().getName()))
+                                || (var01.getAddress().getUnsignedOffset() != in.getAddress().getUnsignedOffset())) {
+                            return false;
+                        }
+                    }
+                }
+
+                for (int j = 0; j < pattern.get(pattern_i).out().size(); j++) {
+                    final var outPattern = pattern.get(pattern_i).out().get(j);
+                    final var out = pcode.get(i).getOutput();
+                    if ((outPattern & VAR_01) != 0) {
+                        if (var01 == null) {
+                            var01 = out;
+                        } else if (!(var01.getAddress().getAddressSpace().getName()
+                                .equals(out.getAddress().getAddressSpace().getName()))
+                                || (var01.getAddress().getUnsignedOffset() != out.getAddress().getUnsignedOffset())) {
+                            return false;
+                        }
+                        continue;
+                    }
+                    if ((outPattern & REG) != 0) {
+                        continue;
+                    }
+                    if (!out.isRegister()) {
+                        return false;
+                    }
+                }
+
+                pattern_i++;
+
+                if (pattern_i == pattern.size()) {
+                    return true;
+                }
+            }
+
+            return pattern_i == pattern.size();
+        }
     }
 }
