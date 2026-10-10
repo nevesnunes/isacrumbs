@@ -86,6 +86,19 @@ Memory references may be automatically generated.
 
 Function inlining is done on a best-effort to ensure callee modified values are also propagated to caller functions (expected when callee killed registers aren't restored).
 
+**Example:** Constant propagated via register
+
+* Disassembly:
+    * <img src="./ghidra/examples/propagate_reg1.png">
+* Decompilation:
+    * <img src="./ghidra/examples/propagate_reg2.png">
+
+Output:
+```
+#1 @ 000010 -(called-at)-> 000003
+Resolved @ 000010 => [RegisterValue(BX): mask=0x0000ffff value=0x00000020, RegisterValue(DF): mask=0xff value=0x00, RegisterValue(BH): mask=0x0000ff00 value=0x00000000, RegisterValue(BL): mask=0x000000ff value=0x00000020]
+```
+
 ## [AsmGen](./ghidra/src/AsmGenVisitor.java)
 
 Generate all possible instruction byte sequences from Ghidra SLEIGH processor specification files (.slaspec).
