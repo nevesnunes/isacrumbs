@@ -108,7 +108,7 @@ public class BackTaint extends GhidraScript {
 
     @Override
     protected void run() throws Exception {
-        init(currentProgram, currentAddress, Collections.emptySet());
+        init(currentProgram, currentAddress, new HashSet<>());
         flow();
     }
 
@@ -139,6 +139,13 @@ public class BackTaint extends GhidraScript {
             set(prg, new TaskMonitorAdapter());
         }
 
+        if (funcAddrs.isEmpty()) {
+            var it = prg.getFunctionManager().getFunctions(true);
+            while (it.hasNext()) {
+                var func = it.next();
+                funcAddrs.add(String.format("0x%08x", func.getEntryPoint().getUnsignedOffset()));
+            }
+        }
         funcAddrs.forEach(funcAddr -> decompile(
                 prg.getFunctionManager().getFunctionContaining(prg.getAddressFactory().getAddress(funcAddr))));
     }

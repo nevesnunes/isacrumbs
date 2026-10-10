@@ -141,7 +141,7 @@ public class BackTaintTest {
                                         """,
                                 "0x10",
                                 """
-                                        b0 01     # MOV AX,0x1 <-'
+                                        b0 01     # MOV AL,0x1 <-'
                                         c3        # RET
                                         """),
                         Set.of("0x0", "0x10"),
