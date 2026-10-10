@@ -452,7 +452,7 @@ public class BackTaintTest {
         var tctx = script.flow();
         var ctxAddrs = Set.copyOf(tctx.deps().values());
         expectedSrcs.forEach((addrStr, match) -> {
-            var addr = script.lang.getAddressFactory().getAddress(addrStr);
+            var addr = script.prg.getAddressFactory().getAddress(addrStr);
             assertTrue(
                     ctxAddrs.contains(addr),
                     String.format(
@@ -482,8 +482,8 @@ public class BackTaintTest {
                                 match.val,
                                 ctxVar.getOffset()));
             } else if (match.spaceType == AddressSpace.TYPE_REGISTER) {
-                var matchReg = script.lang.getRegister(match.val.toString());
-                var ctxReg = script.lang.getRegister(ctxVar.getAddress(), ctxVar.getSize());
+                var matchReg = script.prg.getRegister(match.val.toString());
+                var ctxReg = script.prg.getRegister(ctxVar.getAddress(), ctxVar.getSize());
                 assertEquals(
                         matchReg,
                         ctxReg,
