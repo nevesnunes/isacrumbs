@@ -1,6 +1,6 @@
 # ISAcrumbs
 
-* [Ghidra scripts](./ghidra/) for program analysis;
+* [Ghidra scripts](./ghidra/) for program analysis (tested on 12.0.4);
     * Symlink files from `./ghidra/src/` to `$HOME/ghidra_scripts/`;
     * Add `./ghidra/test/` as a source directory in a Ghidra Script Project;
 * Practical use case for identified tainted sources: [MAME plugin](./mame/plugins/fuzz/init.lua) that fuzzes emulated drivers;
@@ -105,7 +105,7 @@ Generate all possible instruction byte sequences from Ghidra SLEIGH processor sp
 
 **Example:** Visualize an instruction set's byte coverage as heatmaps, e.g. MOS 6502:
 
-<img src="./ghidra/examples/heatmaps.png" height=280rem>
+<img src="./ghidra/examples/heatmaps.png" height=320rem>
 
 Rows are high 4-bits, columns are low 4-bits. Each set of heatmaps corresponds to the 1st byte of single byte instructions, then 1st and 2nd bytes of 2-byte instructions, etc. Only the first value of 16-bit operands is rendered.
 
